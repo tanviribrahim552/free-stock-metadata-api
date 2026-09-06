@@ -4,17 +4,18 @@ require("dotenv").config();
 
 const app = express();
 
-// Render will provide PORT automatically
 const PORT = process.env.PORT || 10000;
+
+// Gemini configuration
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = "gemini-flash-latest";
 
 // ===============================
 // Middleware
 // ===============================
 
-// Allow requests from frontend
 app.use(cors());
 
-// Accept JSON requests
 app.use(
   express.json({
     limit: "10mb"
@@ -22,10 +23,9 @@ app.use(
 );
 
 // ===============================
-// Basic Routes
+// Home
 // ===============================
 
-// Home / API status
 app.get("/", (req, res) => {
   res.json({
     success: true,
@@ -34,12 +34,82 @@ app.get("/", (req, res) => {
   });
 });
 
-// Health check
+// ===============================
+// Health Check
+// ===============================
+
 app.get("/health", (req, res) => {
   res.json({
     success: true,
-    status: "healthy"
+    status: "healthy",
+    geminiConfigured: Boolean(GEMINI_API_KEY)
   });
+});
+
+// ===============================
+// Test Gemini
+// ===============================
+
+app.post("/test-gemini", async (req, res) => {
+  try {
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({
+        success: false,
+        error: "Gemini API key is not configured."
+      });
+    }
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": GEMINI_API_KEY
+        },
+
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: "Reply with exactly: Gemini connection successful."
+                }
+              ]
+            }
+          ]
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Gemini API Error:", data);
+
+      return res.status(response.status).json({
+        success: false,
+        error: data
+      });
+    }
+
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    res.json({
+      success: true,
+      message: text
+    });
+
+  } catch (error) {
+    console.error("Server Error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to connect to Gemini."
+    });
+  }
 });
 
 // ===============================
@@ -47,5 +117,7 @@ app.get("/health", (req, res) => {
 // ===============================
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Free Stock Metadata API running on port ${PORT}`);
+  console.log(
+    `Free Stock Metadata API running on port ${PORT}`
+  );
 });
