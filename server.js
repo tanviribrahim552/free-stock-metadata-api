@@ -1230,25 +1230,122 @@ Use exactly this structure:
 );
 
 // ============================================================
-// Future Tool: Image to Prompt
+// Image to Prompt
 //
-// Endpoint reserved for future implementation.
-// Blogger can later call:
-//
-// POST /image-to-prompt
-//
-// without changing the overall API architecture.
+// Expects JSON:
+// {
+//   "image": "data:image/jpeg;base64,..."
+// }
+// or:
+// {
+//   "base64Data": "data:image/jpeg;base64,..."
+// }
 // ============================================================
 
 app.post(
   "/image-to-prompt",
   rateLimit,
   async (req, res) => {
-    return res.status(501).json({
-      success: false,
-      error:
-        "Image to Prompt is not implemented yet."
-    });
+    try {
+      if (
+        AI_PROVIDER === "gemini" &&
+        !GEMINI_API_KEY
+      ) {
+        return res.status(500).json({
+          success: false,
+          error: "Gemini API key is not configured."
+        });
+      }
+
+      const image = req.body?.image || req.body?.base64Data;
+
+      if (!image) {
+        return res.status(400).json({
+          success: false,
+          error: "Image is required."
+        });
+      }
+
+      if (typeof image !== "string") {
+        return res.status(400).json({
+          success: false,
+          error: "Image must be a base64 data URL."
+        });
+      }
+
+      const match = image.match(
+        /^data:(image\/jpeg|image\/png|image\/webp);base64,(.+)$/
+      );
+
+      if (!match) {
+        return res.status(400).json({
+          success: false,
+          error: "Only JPG, PNG and WEBP base64 images are supported."
+        });
+      }
+
+      const mimeType = match[1];
+      const base64Data = match[2];
+      const imageSize = (base64Data.length * 3) / 4;
+      const MAX_IMAGE_SIZE = 7 * 1024 * 1024;
+
+      if (imageSize > MAX_IMAGE_SIZE) {
+        return res.status(400).json({
+          success: false,
+          error: "Image must be smaller than 7 MB."
+        });
+      }
+
+      const promptInstruction = `
+Analyze the uploaded image and create one detailed visual generation prompt.
+
+Describe only what is visibly present. Include the main subject, setting,
+background, composition, camera/viewpoint, lighting, colors, mood, texture,
+and useful artistic or photographic style details when they are visible.
+
+Do not invent people, objects, text, logos, brands, locations, or events.
+Do not mention stock platforms. Do not add explanations or markdown.
+Return ONLY valid JSON using exactly this structure:
+{
+  "prompt": ""
+}
+`;
+
+      const result = await callAIProvider([
+        {
+          text: promptInstruction
+        },
+        {
+          inline_data: {
+            mime_type: mimeType,
+            data: base64Data
+          }
+        }
+      ]);
+
+      const generatedPrompt = cleanText(
+        result?.prompt || result?.description || result?.text || ""
+      ).slice(0, 4000);
+
+      if (!generatedPrompt) {
+        throw new Error("AI returned an empty image prompt.");
+      }
+
+      return res.json({
+        success: true,
+        provider: AI_PROVIDER,
+        prompt: generatedPrompt
+      });
+    } catch (error) {
+      console.error("Image-to-prompt generation error:", error);
+
+      return res.status(503).json({
+        success: false,
+        error:
+          error.message ||
+          "Failed to generate image prompt. Please try again."
+      });
+    }
   }
 );
 
